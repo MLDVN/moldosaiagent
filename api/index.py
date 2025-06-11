@@ -15,6 +15,17 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
+# --- Rută Rădăcină Opțională pentru testare în browser ---
+@app.route("/", methods=["GET"])
+def home():
+    """
+    Rută simplă pentru a verifica dacă aplicația rulează.
+    Va returna un mesaj atunci când accesezi URL-ul Vercel direct din browser (fără /api/webhook).
+    """
+    return jsonify({"status": "running", "message": "Chatbot-ul este activ și așteaptă mesaje pe /api/webhook"}), 200
+# --- Sfârșit rută rădăcină opțională ---
+
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     """
