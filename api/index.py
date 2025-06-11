@@ -6,8 +6,7 @@ import requests
 from datetime import datetime # Importăm datetime pentru timestamp-uri în log
 
 # Importăm logica agentului AI din fișierul separat
-from .ai_agent_utils import get_bot_response, send_message_to_worksheet
-
+from ai_agent_utils import *
 app = Flask(__name__)
 
 # Variabile de mediu (setate pe Vercel)
@@ -26,7 +25,7 @@ def home():
 # --- Sfârșit rută rădăcină opțională ---
 
 
-@app.route("/webhook", methods=["GET", "POST"])
+@app.route("/api/webhook", methods=["GET", "POST"])
 def webhook():
     """
     Gestionează cererile webhook de la Meta (WhatsApp/Instagram).
@@ -73,13 +72,13 @@ def webhook():
                                     bot_response_text = get_bot_response(sender_id, user_message_text)
 
                                     # Salvăm mesajul utilizatorului și răspunsul botului în Google Sheet-uri pentru log
-                                    try:
-                                        # Data și ora pentru log
-                                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        send_message_to_worksheet("ChatBotLogs", [[sender_id, user_message_text, bot_response_text, timestamp]])
-                                        print("Message logged to Google Sheet 'ChatBotLogs'.")
-                                    except Exception as gs_e:
-                                        print(f"Error logging to Google Sheet 'ChatBotLogs': {gs_e}")
+                                    # try:
+                                    #     # Data și ora pentru log
+                                    #     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    #     send_message_to_worksheet("UserConversations", [[sender_id, user_message_text, bot_response_text, timestamp]])
+                                    #     print("Message logged to Google Sheet 'ChatBotLogs'.")
+                                    # except Exception as gs_e:
+                                    #     print(f"Error logging to Google Sheet 'ChatBotLogs': {gs_e}")
 
                                     # Trimitem răspunsul înapoi către utilizator prin API-ul Meta
                                     send_meta_message(sender_id, bot_response_text)
@@ -130,15 +129,4 @@ def send_meta_message(to, text):
 # Pentru testare locală (rulează `python api/index.py`)
 # Această secțiune NU este folosită în producție pe Vercel, unde variabilele de mediu sunt setate separat.
 if __name__ == "__main__":
-    # Setează variabilele de mediu pentru testarea locală
-    # Asigură-te că acestea sunt doar pentru dezvoltare locală și NU le lași în Git!
-    os.environ["VERIFY_TOKEN"] = "un_token_secret_pentru_test" # Alege-ți propriul token
-    os.environ["META_ACCESS_TOKEN"] = "YOUR_META_ACCESS_TOKEN_FOR_LOCAL_TESTING" # Token de test Meta
-    os.environ["WHATSAPP_PHONE_NUMBER_ID"] = "YOUR_WHATSAPP_PHONE_NUMBER_ID" # ID-ul numărului tău de test din Meta Developers
-    os.environ["OPENAI_API_KEY"] = "sk-YOUR_OPENAI_API_KEY" # Cheia ta OpenAI
-    # Credențialele Google Sheets ca JSON string, pe o singură linie
-    # Înlocuiește cu conținutul real al fișierului JSON, transformat într-un string pe o linie.
-    os.environ["GOOGLE_SHEETS_CREDENTIALS"] = json.dumps({"type": "service_account", "project_id": "your-project-id", "private_key_id": "...", "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n", "client_email": "...", "client_id": "...", "auth_uri": "...", "token_uri": "...", "auth_provider_x509_cert_url": "...", "client_x509_cert_url": "..."})
-    os.environ["GOOGLE_SHEETS_URL"] = "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
-
     app.run(debug=True, port=os.environ.get("PORT", 5000))

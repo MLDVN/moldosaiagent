@@ -12,23 +12,22 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo") # Modelul OpenAI implicit
 GOOGLE_SHEETS_CREDENTIALS_JSON = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
 GOOGLE_SHEETS_URL = os.environ.get("GOOGLE_SHEETS_URL")
+DEFAULT_WS = "BuyTech"
 
 # --- Google Sheets Integration ---
 gc = None # Obiectul client gspread, va fi inițializat o singură dată
 
 def get_gspread_client():
-    """
-    Returnează un client gspread autentificat.
-    Autentificarea se face o singură dată la prima solicitare a funcției.
-    """
     global gc
     if gc is None:
+        # Folosim variabila de mediu GOOGLE_SHEETS_CREDENTIALS_JSON pentru producție (Vercel)
+        GOOGLE_SHEETS_CREDENTIALS_JSON = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
         if not GOOGLE_SHEETS_CREDENTIALS_JSON:
-            raise ValueError("GOOGLE_SHEETS_CREDENTIALS variable not set. Cannot authenticate gspread.")
+            raise ValueError("GOOGLE_SHEETS_CREDENTIALS variable not set for production.")
         try:
             creds_dict = json.loads(GOOGLE_SHEETS_CREDENTIALS_JSON)
             gc = gspread.service_account_from_dict(creds_dict)
-            print("gspread client authenticated successfully.")
+            print("gspread client authenticated from environment variable.")
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in GOOGLE_SHEETS_CREDENTIALS: {e}")
         except Exception as e:
@@ -128,7 +127,7 @@ def save_conversation_gsheet(sender_id, conversation):
 
 
 # --- Agentul AI (OpenAI) ---
-def get_bot_response(sender_id, user_message):
+def get_bot_response(sender_id, user_message, ws=DEFAULT_WS):
     """
     Extrage răspunsul de la OpenAI, incluzând istoricul conversației
     și baza de cunoștințe din Google Sheets.
@@ -139,15 +138,15 @@ def get_bot_response(sender_id, user_message):
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     # 1. Obține lista FAQs din Google Sheets
-    # 'SMAB' ar trebui să aibă coloana 0 = Întrebare, coloana 1 = Răspuns
-    faqs_data = get_gsheet_data('SMAB')
+    # ws ar trebui să aibă coloana 0 = Întrebare, coloana 1 = Răspuns
+    faqs_data = get_gsheet_data(ws)
     faqs_str = ""
     if len(faqs_data) > 1:
         # Excludem rândul de antet (primul rând) și verificăm dacă există suficiente coloane
         faqs_str = '\n'.join([f"Întrebare: {f[0]}, Răspuns: {f[1]}" for f in faqs_data[1:] if len(f) >= 2])
-        print("FAQs loaded from Google Sheet 'SMAB'.")
+        print(f"FAQs loaded from Google Sheet '{ws}'.")
     else:
-        print("No FAQs found or sheet 'SMAB' is empty.")
+        print(f"No FAQs found or sheet '{ws}' is empty.")
 
 
     # 2. Obține lista de produse (dacă este cazul)
@@ -209,4 +208,3 @@ def get_bot_response(sender_id, user_message):
     except Exception as e:
         print(f"Error calling OpenAI API: {e}")
         return "Ne pare rău, am o problemă tehnică momentan. Te rog să încerci din nou mai târziu."
-
