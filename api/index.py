@@ -15,7 +15,7 @@ META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
 # --- Rută Rădăcină Opțională pentru testare în browser ---
-@app.route("/", methods=["GET"])
+@app.route("/api", methods=["GET"])
 def home():
     """
     Rută simplă pentru a verifica dacă aplicația rulează.
