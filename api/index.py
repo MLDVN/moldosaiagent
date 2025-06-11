@@ -15,7 +15,7 @@ META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
 # --- Rută Rădăcină Opțională pentru testare în browser ---
-@app.route("/api", methods=["GET"])
+@app.route("/", methods=["GET"])
 def home():
     """
     Rută simplă pentru a verifica dacă aplicația rulează.
@@ -25,7 +25,7 @@ def home():
 # --- Sfârșit rută rădăcină opțională ---
 
 
-@app.route("/api/webhook", methods=["GET", "POST"])
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     """
     Gestionează cererile webhook de la Meta (WhatsApp/Instagram).
