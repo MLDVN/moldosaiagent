@@ -21,7 +21,7 @@ WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
 # --- Rută Rădăcină Opțională pentru testare în browser (pe /api) ---
 # Aceasta va mapa la https://domeniul-tau.vercel.app/api
-@app.route("/", methods=["GET"])
+@app.route("/api", methods=["GET"])
 def api_root():
     """
     Rută simplă pentru a verifica dacă aplicația rulează.
@@ -32,7 +32,7 @@ def api_root():
 
 # --- Ruta webhook corectă ---
 # Aceasta va mapa la https://domeniul-tau.vercel.app/api/webhook
-@app.route("/webhook", methods=["GET", "POST"]) # <--- Aceasta este ruta pentru /api/webhook pe Vercel
+@app.route("/api/webhook", methods=["GET", "POST"]) # <--- Aceasta este ruta pentru /api/webhook pe Vercel
 def webhook():
     """
     Gestionează cererile webhook de la Meta (WhatsApp/Instagram).
