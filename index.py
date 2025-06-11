@@ -21,7 +21,7 @@ WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
 # --- Rută Rădăcină Opțională pentru testare în browser (pe /api) ---
 # Aceasta va mapa la https://domeniul-tau.vercel.app/api
-@app.route("/", methods=["GET"]) # <--- Aceasta este ruta pentru /api pe Vercel
+@app.route("/", methods=["GET"])
 def api_root():
     """
     Rută simplă pentru a verifica dacă aplicația rulează.
