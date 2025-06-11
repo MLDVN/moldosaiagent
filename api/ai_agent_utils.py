@@ -10,28 +10,46 @@ from datetime import datetime
 # Acestea vor fi încărcate automat de Vercel din setările proiectului
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-3.5-turbo") # Modelul OpenAI implicit
-GOOGLE_SHEETS_CREDENTIALS_JSON = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
 GOOGLE_SHEETS_URL = os.environ.get("GOOGLE_SHEETS_URL")
-DEFAULT_WS = "BuyTech"
+
+# Calea către fișierul JSON de credențiale Google Sheets (PENTRU TESTARE LOCALĂ)
+# Această cale este relativă la fișierul curent (ai_agent_utils.py)
+LOCAL_GCREDS_PATH = os.path.join(os.path.dirname(__file__), "gsheets_creds_bot.json")
+
 
 # --- Google Sheets Integration ---
 gc = None # Obiectul client gspread, va fi inițializat o singură dată
 
 def get_gspread_client():
+    """
+    Returnează un client gspread autentificat.
+    Autentificarea se face o singură dată la prima solicitare a funcției.
+    """
     global gc
     if gc is None:
-        # Folosim variabila de mediu GOOGLE_SHEETS_CREDENTIALS_JSON pentru producție (Vercel)
-        GOOGLE_SHEETS_CREDENTIALS_JSON = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
-        if not GOOGLE_SHEETS_CREDENTIALS_JSON:
-            raise ValueError("GOOGLE_SHEETS_CREDENTIALS variable not set for production.")
-        try:
-            creds_dict = json.loads(GOOGLE_SHEETS_CREDENTIALS_JSON)
-            gc = gspread.service_account_from_dict(creds_dict)
-            print("gspread client authenticated from environment variable.")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in GOOGLE_SHEETS_CREDENTIALS: {e}")
-        except Exception as e:
-            raise Exception(f"Failed to authenticate gspread: {e}")
+        # Vedem dacă suntem în modul de dezvoltare locală ȘI dacă fișierul local de credențiale există
+        if os.environ.get("FLASK_ENV") == "development" and os.path.exists(LOCAL_GCREDS_PATH):
+            # Citim direct din fișierul local pentru dezvoltare
+            try:
+                gc = gspread.service_account(filename=LOCAL_GCREDS_PATH)
+                print(f"gspread client authenticated from local file: {LOCAL_GCREDS_PATH}")
+            except Exception as e:
+                # Logăm eroarea specifică de fișier
+                print(f"ERROR: Failed to authenticate gspread from local file '{LOCAL_GCREDS_PATH}': {e}")
+                raise ValueError("Could not authenticate Google Sheets from local file. Check path and permissions.")
+        else:
+            # Folosim variabila de mediu GOOGLE_SHEETS_CREDENTIALS_JSON pentru producție (Vercel)
+            GOOGLE_SHEETS_CREDENTIALS_JSON = os.environ.get("GOOGLE_SHEETS_CREDENTIALS")
+            if not GOOGLE_SHEETS_CREDENTIALS_JSON:
+                raise ValueError("GOOGLE_SHEETS_CREDENTIALS variable not set for production. (or FLASK_ENV/LOCAL_GCREDS_PATH issue)")
+            try:
+                creds_dict = json.loads(GOOGLE_SHEETS_CREDENTIALS_JSON)
+                gc = gspread.service_account_from_dict(creds_dict)
+                print("gspread client authenticated successfully from environment variable.")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in GOOGLE_SHEETS_CREDENTIALS environment variable: {e}")
+            except Exception as e:
+                raise Exception(f"Failed to authenticate gspread from environment variable: {e}")
     return gc
 
 def get_worksheet(sheet_name, url=GOOGLE_SHEETS_URL):
@@ -54,7 +72,6 @@ def get_gsheet_data(sheet_name):
         return ws.get_all_values()
     except Exception as e:
         print(f"Error reading data from sheet '{sheet_name}': {e}")
-        # Returnăm o listă goală pentru a permite execuția programului chiar dacă citirea eșuează
         return []
 
 def send_message_to_worksheet(sheet_name, msg_list):
@@ -65,138 +82,102 @@ def send_message_to_worksheet(sheet_name, msg_list):
     try:
         ws = get_worksheet(sheet_name)
         for row in msg_list:
-            ws.append_row(row) # msg_list ar trebui să conțină rânduri deja formatate
+            ws.append_row(row)
         print(f"Data appended to sheet '{sheet_name}'.")
     except Exception as e:
-        print(f"Error sending message to worksheet '{sheet_name}': {e}")
-        # Ridicăm excepția pentru a permite gestionarea erorilor în funcția apelantă (index.py)
+        print(f"Error sending message to worksheet '{sheet_name}': {e}. Please ensure sheet exists and permissions are correct.")
         raise
 
 
 # --- Gestionarea Istoricului Conversației în Google Sheets ---
-CONVERSATION_SHEET_NAME = "UserConversations" # Numele foii pentru istoricul conversațiilor
+CONVERSATION_SHEET_NAME = "UserConversations"
 
 def get_conversation_history_gsheet(sender_id, max_messages=10):
-    """
-    Recuperează istoricul conversației pentru un utilizator din Google Sheets.
-    Returnează o listă de dicționare {'role': ..., 'content': ...}.
-    """
     try:
         ws = get_worksheet(CONVERSATION_SHEET_NAME)
-        # Căutăm rândul corespunzător sender_id-ului în prima coloană
-        # ws.find() este destul de eficient pentru căutări unice
         cell = ws.find(sender_id, in_column=1)
 
         if cell:
-            # Dacă sender_id-ul este găsit, citim conținutul coloanei ConversationHistory (coloana B, index 2)
-            conversation_json_str = ws.cell(cell.row, 2).value # Coloana B are indexul 2
+            conversation_json_str = ws.cell(cell.row, 2).value
             if conversation_json_str:
                 conversation = json.loads(conversation_json_str)
-                # Limităm numărul de mesaje pentru a controla tokenii trimiși către OpenAI
                 return conversation[-max_messages:]
-        return [] # Returnăm listă goală dacă nu s-a găsit sau nu există istoric
+        return []
     except Exception as e:
         print(f"Error getting conversation history from GSheet for {sender_id}: {e}")
-        # În caz de eroare, tratăm ca și cum nu ar exista istoric pentru a nu bloca botul
         return []
 
 def save_conversation_gsheet(sender_id, conversation):
-    """
-    Salvează sau actualizează istoricul conversației pentru un utilizator în Google Sheets.
-    """
     try:
         ws = get_worksheet(CONVERSATION_SHEET_NAME)
-        # Transformăm lista de mesaje într-un string JSON
         conversation_json_str = json.dumps(conversation)
 
-        # Căutăm dacă utilizatorul există deja
         cell = ws.find(sender_id, in_column=1)
 
         if cell:
-            # Actualizăm celula existentă cu noul istoric
-            ws.update_cell(cell.row, 2, conversation_json_str) # Coloana B are indexul 2
+            ws.update_cell(cell.row, 2, conversation_json_str)
             print(f"Updated conversation history for {sender_id} in GSheet at row {cell.row}.")
         else:
-            # Dacă utilizatorul nu există, adăugăm un rând nou
-            # Asigură-te că foaia UserConversations are anteturile SenderID și ConversationHistory
             ws.append_row([sender_id, conversation_json_str])
             print(f"Created new conversation history for {sender_id} in GSheet.")
     except Exception as e:
         print(f"Error saving conversation to GSheet for {sender_id}: {e}")
-        # Logăm eroarea, dar nu o aruncăm pentru a nu bloca răspunsul botului
 
 
 # --- Agentul AI (OpenAI) ---
-def get_bot_response(sender_id, user_message, ws=DEFAULT_WS):
-    """
-    Extrage răspunsul de la OpenAI, incluzând istoricul conversației
-    și baza de cunoștințe din Google Sheets.
-    """
+# Aici am eliminat parametrul 'ws' din semnătura funcției, deoarece 'SMAB' e hardcodat
+def get_bot_response(sender_id, user_message):
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY not set. Cannot get response from OpenAI.")
 
     client = OpenAI(api_key=OPENAI_API_KEY)
 
-    # 1. Obține lista FAQs din Google Sheets
-    # ws ar trebui să aibă coloana 0 = Întrebare, coloana 1 = Răspuns
-    faqs_data = get_gsheet_data(ws)
+    # 1. Obține lista FAQs din Google Sheets (folosind numele foii direct)
+    faqs_ws = 'BuyTech'
+    faqs_data = get_gsheet_data(faqs_ws)
     faqs_str = ""
     if len(faqs_data) > 1:
-        # Excludem rândul de antet (primul rând) și verificăm dacă există suficiente coloane
         faqs_str = '\n'.join([f"Întrebare: {f[0]}, Răspuns: {f[1]}" for f in faqs_data[1:] if len(f) >= 2])
-        print(f"FAQs loaded from Google Sheet '{ws}'.")
+        print(f"FAQs loaded from Google Sheet '{faqs_ws}'.")
     else:
-        print(f"No FAQs found or sheet '{ws}' is empty.")
+        print(f"No FAQs found or sheet '{faqs_ws}' is empty.")
 
-
-    # 2. Obține lista de produse (dacă este cazul)
-    # 'Products' ar trebui să aibă coloana 0 = Nume produs, coloana 1 = Pret, coloana 4 = Moneda
+    # 2. Obține lista de produse (folosind numele foii direct)
     products_data = get_gsheet_data('Products')
     products_str = ""
     if len(products_data) > 1:
-        # Excludem rândul de antet și verificăm dacă există suficiente coloane
         products_str = '[' + '\n'.join([f"Nume produs: {p[0]}, Pret: {p[1]} {p[4]}" for p in products_data[1:] if len(p) >= 5]) + ']'
         print("Products loaded from Google Sheet 'Products'.")
     else:
         print("No products found or sheet 'Products' is empty.")
 
-    # 3. Creează mesajul de sistem cu baza de cunoștințe
     system_message = (
         "Ești un asistent util pentru o burgerie numită 'Burger Mania'. "
         "Folosește următoarele informații pentru a răspunde:\n"
         f"**Întrebări frecvente**:\n{faqs_str}\n\n"
         f"**Listă Produse**:\n{products_str}\n"
-        f"**Comenzi**:[Procesul de comanda include preluarea adresei de livrare, numărul de telefon și ce produse dorește clientul. Nu avem încă implementat un sistem de plată direct, ci doar de preluare comanda, așadar la final de conversație amintește că plata se face la livrare cu cardul sau cash.]\n\n"
+        f"**Comenzi**:[Procesul de comanda include preluarea adresei de livrare, numărul de telefon și ce produse dorește clientul. Nu avem încă implementat un sistem de plata direct, ci doar de preluare comanda, așadar la final de conversație amintește că plata se face la livrare cu cardul sau cash.]\n\n"
         "Răspunde clar, concis și bazat doar pe informațiile furnizate. "
         "Încearcă să-l ghidezi spre una dintre opțiuni sau la final să-l întrebi dacă mai are alte întrebări."
         "Dacă nu știi răspunsul, spune că vei verifica cu echipa și oferă un număr de telefon (ex. 07xx-xxx-xxx) sau adresa de email (ex. contact@burgeriemania.ro) pentru contact direct."
     )
 
-    # 4. Recuperează istoricul conversației din Google Sheets
-    # Inițializăm conversation_history ca o listă mutabilă
     conversation_history = get_conversation_history_gsheet(sender_id)
 
-    # 5. Construiește lista de mesaje pentru OpenAI API
     messages = []
-    # Adaugă mesajul de sistem la început
     messages.append({'role': 'system', 'content': system_message})
-    # Adaugă istoricul conversației recuperat
     messages.extend(conversation_history)
-    # Adaugă mesajul curent al utilizatorului
     messages.append({'role': 'user', 'content': user_message})
 
-    # 6. Apel la OpenAI API
     try:
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
-            max_tokens=1000, # Poți ajusta acest lucru pentru a controla lungimea răspunsurilor
-            temperature=0.7 # Poți ajusta acest lucru pentru a controla creativitatea răspunsurilor
+            max_tokens=1000,
+            temperature=0.7
         )
         bot_response_content = response.choices[0].message.content.strip()
 
-        # 7. Salvează mesajul utilizatorului și răspunsul botului în istoricul Google Sheets
-        # Actualizăm lista de mesaje din memorie înainte de a o salva
         conversation_history.append({'role': 'user', 'content': user_message})
         conversation_history.append({'role': 'assistant', 'content': bot_response_content})
         save_conversation_gsheet(sender_id, conversation_history)

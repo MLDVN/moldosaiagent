@@ -3,10 +3,14 @@ import json
 import os
 from flask import Flask, request, jsonify
 import requests
-from datetime import datetime # Importăm datetime pentru timestamp-uri în log
+from datetime import datetime
 
-# Importăm logica agentului AI din fișierul separat
-from .ai_agent_utils import *
+# --- IMPORTANT: Importul pentru Vercel (Production) ---
+# Acest import trebuie să fie relativ pentru ca Vercel să găsească fișierul
+# ai_agent_utils.py în același pachet 'api'.
+from .ai_agent_utils import get_bot_response, send_message_to_worksheet
+
+
 app = Flask(__name__)
 
 # Variabile de mediu (setate pe Vercel)
@@ -14,18 +18,21 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
-# --- Rută Rădăcină Opțională pentru testare în browser ---
-@app.route("/", methods=["GET"])
-def home():
+
+# --- Rută Rădăcină Opțională pentru testare în browser (pe /api) ---
+# Aceasta va mapa la https://domeniul-tau.vercel.app/api
+@app.route("/", methods=["GET"]) # <--- Aceasta este ruta pentru /api pe Vercel
+def api_root():
     """
     Rută simplă pentru a verifica dacă aplicația rulează.
-    Va returna un mesaj atunci când accesezi URL-ul Vercel direct din browser (fără /api/webhook).
+    Va returna un mesaj atunci când accesezi URL-ul Vercel cu /api la final.
     """
     return jsonify({"status": "running", "message": "Chatbot-ul este activ și așteaptă mesaje pe /api/webhook"}), 200
-# --- Sfârșit rută rădăcină opțională ---
 
 
-@app.route("/webhook", methods=["GET", "POST"])
+# --- Ruta webhook corectă ---
+# Aceasta va mapa la https://domeniul-tau.vercel.app/api/webhook
+@app.route("/webhook", methods=["GET", "POST"]) # <--- Aceasta este ruta pentru /api/webhook pe Vercel
 def webhook():
     """
     Gestionează cererile webhook de la Meta (WhatsApp/Instagram).
@@ -52,42 +59,31 @@ def webhook():
         print("Received webhook data:", json.dumps(data, indent=2))
 
         try:
-            # Structura Meta pentru webhook-uri poate varia ușor.
-            # Acesta este un exemplu pentru mesajele WhatsApp.
             if "entry" in data and data["entry"]:
                 for entry in data["entry"]:
                     for change in entry.get("changes", []):
                         if change.get("field") == "messages":
                             for message in change.get("value", {}).get("messages", []):
-                                # Verificăm tipul de mesaj. Ne interesează mesajele text.
-                                # Poți adăuga logica pentru alte tipuri (imagini, audio, etc.) dacă e necesar.
                                 if message.get("type") == "text":
                                     sender_id = message["from"]
                                     user_message_text = message["text"]["body"]
 
                                     print(f"Received message from {sender_id}: {user_message_text}")
 
-                                    # Apelăm funcția agentului AI pentru a obține răspunsul
-                                    # Aceasta se va ocupa de istoricul conversației și knowledge base.
                                     bot_response_text = get_bot_response(sender_id, user_message_text)
 
-                                    # Salvăm mesajul utilizatorului și răspunsul botului în Google Sheet-uri pentru log
-                                    # try:
-                                    #     # Data și ora pentru log
-                                    #     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    #     send_message_to_worksheet("UserConversations", [[sender_id, user_message_text, bot_response_text, timestamp]])
-                                    #     print("Message logged to Google Sheet 'ChatBotLogs'.")
-                                    # except Exception as gs_e:
-                                    #     print(f"Error logging to Google Sheet 'ChatBotLogs': {gs_e}")
+                                    try:
+                                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        send_message_to_worksheet("ChatBotLogs", [[sender_id, user_message_text, bot_response_text, timestamp]])
+                                        print("Message logged to Google Sheet 'ChatBotLogs'.")
+                                    except Exception as gs_e:
+                                        print(f"Error logging to Google Sheet 'ChatBotLogs': {gs_e}")
 
-                                    # Trimitem răspunsul înapoi către utilizator prin API-ul Meta
                                     send_meta_message(sender_id, bot_response_text)
                                 elif message.get("type") == "button":
-                                    # Exemplu de gestionare a răspunsurilor de la butoane (dacă folosești butoane rapide WhatsApp)
                                     sender_id = message["from"]
                                     button_payload = message["button"]["payload"]
                                     print(f"Received button click from {sender_id}: {button_payload}")
-                                    # Aici poți adăuga logică pentru a răspunde la click-uri pe butoane
                                     send_meta_message(sender_id, f"Ai apăsat: {button_payload}. Îți pot fi de ajutor cu altceva?")
                                 else:
                                     print(f"Received unsupported message type: {message.get('type')}")
@@ -96,37 +92,47 @@ def webhook():
 
         except Exception as e:
             print(f"Error processing webhook data: {e}")
-            # Este esențial să returnăm 200 OK către Meta chiar și în caz de eroare,
-            # pentru a evita reîncercările multiple ale aceluiași mesaj.
             return jsonify({"status": "error", "message": str(e)}), 200
 
         return "OK", 200
 
 def send_meta_message(to, text):
-    """
-    Trimite un mesaj text înapoi către utilizatorul WhatsApp/Instagram.
-    Ajustează URL-ul și "messaging_product" pentru Instagram dacă este cazul.
-    """
-    # Pentru WhatsApp Cloud API
     url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
         "Content-Type": "application/json",
     }
     payload = {
-        "messaging_product": "whatsapp", # Lasă "whatsapp" pentru WhatsApp. Schimbă la "instagram" pentru Instagram.
+        "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
         "text": {"body": text},
     }
     try:
         response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status() # Aruncă excepție pentru coduri de status HTTP eronate
+        response.raise_for_status()
         print(f"Message sent successfully to {to}: {response.json()}")
     except requests.exceptions.RequestException as e:
         print(f"Failed to send message to {to}: {e}")
 
-# Pentru testare locală (rulează `python api/index.py`)
-# Această secțiune NU este folosită în producție pe Vercel, unde variabilele de mediu sunt setate separat.
+# --- Pentru testare locală (rulează `python api/index.py`) ---
 if __name__ == "__main__":
+    import sys
+    import os
+    # Adaugă directorul părinte ('moldosaiagent') la PATH-ul Python
+    # pentru a permite importul absolut al pachetului 'api'
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    # Acum putem importa din pachetul 'api'
+    from api.ai_agent_utils import get_bot_response, send_message_to_worksheet
+
+    # Setează variabilele de mediu pentru testarea locală
+    os.environ["VERIFY_TOKEN"] = "MoldoAiAgentVerifyToken"
+    os.environ["META_ACCESS_TOKEN"] = "YOUR_META_ACCESS_TOKEN_PENTRU_TESTARE_LOCALA"
+    os.environ["WHATSAPP_PHONE_NUMBER_ID"] = "YOUR_WHATSAPP_PHONE_NUMBER_ID"
+    os.environ["OPENAI_API_KEY"] = "sk-YOUR_OPENAI_API_KEY"
+    os.environ["GOOGLE_SHEETS_CREDENTIALS"] = json.dumps({"type": "service_account", "project_id": "...", "private_key_id": "...", "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n", "client_email": "...", "client_id": "...", "auth_uri": "...", "token_uri": "...", "auth_provider_x509_cert_url": "...", "client_x509_cert_url": "..."})
+    os.environ["GOOGLE_SHEETS_URL"] = "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+    os.environ["FLASK_ENV"] = "development"
+
     app.run(debug=True, port=os.environ.get("PORT", 5000))
