@@ -6,7 +6,7 @@ import requests
 from datetime import datetime # Importăm datetime pentru timestamp-uri în log
 
 # Importăm logica agentului AI din fișierul separat
-from ai_agent_utils import *
+from .ai_agent_utils import *
 app = Flask(__name__)
 
 # Variabile de mediu (setate pe Vercel)
